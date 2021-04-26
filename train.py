@@ -354,7 +354,7 @@ if __name__ == "__main__":
     parser.add_argument('--gpu_id', type=str, default="cpu")
     args = parser.parse_args()
     if args.gpu_id != "cpu":
-        os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu_id)
+        # os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu_id)
         device = torch.device('cuda:' + str(args.gpu_id))
     else:
         device = torch.device("cpu")
