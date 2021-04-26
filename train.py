@@ -12,12 +12,12 @@ from collections import defaultdict
 from gensim.models import word2vec
 from keras_han.model import HAN
 from nltk.corpus import stopwords
-from bert_utils import train_bert, test
+from bert_utils import train_bert, test, filter
 import torch
 import os
 
 
-def main(dataset_path, device=None, print_flag=True):
+def main(dataset_path, device=None, print_flag=True, filter_flag=False):
     def train_word2vec(df, dataset_path):
         def get_embeddings(inp_data, vocabulary_inv, size_features=100,
                            mode='skipgram',
@@ -184,7 +184,8 @@ def main(dataset_path, device=None, print_flag=True):
         model.save(dump_dir + "model_" + model_name + ".h5")
         return pred_labels
 
-    def train_bert_classifier(df, labels, label_term_dict, label_to_index, index_to_label, dataset_path, device):
+    def train_bert_classifier(df, labels, label_term_dict, label_to_index, index_to_label, dataset_path, device,
+                              filter_flag=False):
         """
         Trains BERT classifier and returns predictions on all documents
         :param df:
@@ -201,6 +202,35 @@ def main(dataset_path, device=None, print_flag=True):
 
         X, y, y_true = generate_pseudo_labels(df, labels, label_term_dict, tokenizer)
         y_inds = [label_to_index[i] for i in y]
+
+        correct = 0
+        wrong = 0
+        for i in range(len(y_inds)):
+            if y_inds[i] == label_to_index[y_true[i]]:
+                correct += 1
+            else:
+                wrong += 1
+        print("Correct Samples:", correct, flush=True)
+        print("Wrong Samples:", wrong, flush=True)
+
+        if filter_flag:
+            print("Filtering started..", flush=True)
+            X, y_inds, y_true, _, _, _ = filter(X, y_inds, y_true, device)
+            if len(set(y_inds)) < len(label_to_index):
+                print("Number of labels in training set after filtering:", len(set(y_inds)))
+                raise Exception(
+                    "Number of labels expected " + str(len(label_to_index)) + " but found " + str(len(set(y_inds))))
+            correct = 0
+            wrong = 0
+            for i in range(len(y_inds)):
+                if y_inds[i] == label_to_index[y_true[i]]:
+                    correct += 1
+                else:
+                    wrong += 1
+            print("Filtering completed..", flush=True)
+            print("Correct Samples in New training data:", correct, flush=True)
+            print("Wrong Samples in New training data:", wrong, flush=True)
+
         model = train_bert(X, y_inds, device)
 
         print("****************** CLASSIFICATION REPORT FOR All DOCUMENTS ********************")
@@ -340,7 +370,7 @@ def main(dataset_path, device=None, print_flag=True):
         print("ITERATION: ", i)
         # pred_labels = train_classifier(df, labels, label_term_dict, label_to_index, index_to_label, dataset_path)
         pred_labels = train_bert_classifier(df, labels, label_term_dict, label_to_index, index_to_label, dataset_path,
-                                            device)
+                                            device, filter_flag)
         label_term_dict, components = expand_seeds(df, label_term_dict, pred_labels, label_to_index, index_to_label,
                                                    word_to_index, index_to_word, inv_docfreq, docfreq, i, n1=5)
         if print_flag:
@@ -359,4 +389,4 @@ if __name__ == "__main__":
     else:
         device = torch.device("cpu")
 
-    main(dataset_path=args.dataset_path, device=device)
+    main(dataset_path=args.dataset_path, device=device, filter_flag=args.filter_flag)

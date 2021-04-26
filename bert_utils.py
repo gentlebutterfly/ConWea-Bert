@@ -7,6 +7,7 @@ from transformers import BertForSequenceClassification, BertTokenizer, AdamW, Be
 import time
 import random
 import numpy as np
+from util import *
 
 
 def format_time(elapsed):
@@ -416,3 +417,211 @@ def train_bert(X, y, device):
                   len(set(y)),
                   )
     return model
+
+
+def filter(X, y_pseudo, y_true, device, iteration=None):
+    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
+    start = time.time()
+    input_ids, attention_masks, labels = bert_tokenize(tokenizer, X, y_pseudo)
+    print("Time taken in tokenizing:", time.time() - start)
+
+    # Combine the training inputs into a TensorDataset.
+    dataset = TensorDataset(input_ids, attention_masks, labels)
+
+    batch_size = 32
+    # Create the DataLoaders for our training and validation sets.
+    # We'll take training samples in random order.
+    start = time.time()
+    train_dataloader = DataLoader(
+        dataset,  # The training samples.
+        sampler=RandomSampler(dataset),  # Select batches randomly
+        batch_size=batch_size,  # Trains with this batch size.
+        pin_memory=True,
+        num_workers=16
+    )
+    print("Time taken in initializing dataloader:", time.time() - start)
+
+    num_labels = len(set(y_pseudo))
+    # Tell pytorch to run this model on the GPU.
+
+    # Load BertForSequenceClassification, the pretrained BERT model with a single
+    # linear classification layer on top.
+    model = BertForSequenceClassification.from_pretrained(
+        "bert-base-uncased",  # Use the 12-layer BERT model, with an uncased vocab.
+        num_labels=num_labels,  # The number of output labels--2 for binary classification.
+        # You can increase this for multi-class tasks.
+        output_attentions=False,  # Whether the model returns attentions weights.
+        output_hidden_states=False,  # Whether the model returns all hidden-states.
+    )
+    model = model.to(device)
+
+    # Note: AdamW is a class from the huggingface library (as opposed to pytorch)
+    # I believe the 'W' stands for 'Weight Decay fix"
+    optimizer = AdamW(model.parameters(),
+                      lr=2e-5,  # args.learning_rate - default is 5e-5, our notebook had 2e-5
+                      eps=1e-8  # args.adam_epsilon  - default is 1e-8.
+                      )
+    # Number of training epochs. The BERT authors recommend between 2 and 4.
+    # We chose to run for 4, but we'll see later that this may be over-fitting the
+    # training data.
+    epochs = 1
+
+    # Total number of training steps is [number of batches] x [number of epochs].
+    # (Note that this is not the same as the number of training samples).
+    total_steps = len(train_dataloader) * epochs
+
+    # Create the learning rate scheduler.
+    scheduler = get_linear_schedule_with_warmup(optimizer,
+                                                num_warmup_steps=0,  # Default value in run_glue.py
+                                                num_training_steps=total_steps)
+    # This training code is based on the `run_glue.py` script here:
+    # https://github.com/huggingface/transformers/blob/5bfcd0485ece086ebcbed2d008813037968a9e58/examples/run_glue.py#L128
+
+    # Set the seed value all over the place to make this reproducible.
+    seed_val = 42
+
+    random.seed(seed_val)
+    np.random.seed(seed_val)
+    torch.manual_seed(seed_val)
+    if device.type == "cuda":
+        torch.cuda.manual_seed_all(seed_val)
+
+    # We'll store a number of quantities such as training and validation loss,
+    # validation accuracy, and timings.
+    training_stats = []
+
+    # Measure the total training time for the whole run.
+    total_t0 = time.time()
+
+    # For each epoch...
+
+    print("Getting data that can be trained in 1 epoch..", flush=True)
+    for epoch_i in range(epochs):
+
+        # ========================================
+        #               Training
+        # ========================================
+
+        # Perform one full pass over the training set.
+
+        print("", flush=True)
+        print('======== Epoch {:} / {:} ========'.format(epoch_i + 1, epochs), flush=True)
+        print('Training...', flush=True)
+
+        # Measure how long the training epoch takes.
+        t0 = time.time()
+
+        # Reset the total loss for this epoch.
+        total_train_loss = 0
+
+        # Put the model into training mode. Don't be mislead--the call to
+        # `train` just changes the *mode*, it doesn't *perform* the training.
+        # `dropout` and `batchnorm` layers behave differently during training
+        # vs. test (source: https://stackoverflow.com/questions/51433378/what-does-model-train-do-in-pytorch)
+        model.train()
+        # For each batch of training data...
+        end = time.time()
+        for step, batch in enumerate(train_dataloader):
+            # Progress update every 40 batches.
+            if step % 40 == 0 and not step == 0:
+                # Calculate elapsed time in minutes.
+                elapsed = format_time(time.time() - t0)
+
+                # Report progress.
+                print('  Batch {:>5,}  of  {:>5,}.    Elapsed: {:}.'.format(step, len(train_dataloader), elapsed),
+                      flush=True)
+
+            # Unpack this training batch from our dataloader.
+            #
+            # As we unpack the batch, we'll also copy each tensor to the GPU using the
+            # `to` method.
+            #
+            # `batch` contains three pytorch tensors:
+            #   [0]: input ids
+            #   [1]: attention masks
+            #   [2]: labels
+            b_input_ids = batch[0].to(device)
+            b_input_mask = batch[1].to(device)
+            b_labels = batch[2].to(device)
+
+            # Always clear any previously calculated gradients before performing a
+            # backward pass. PyTorch doesn't do this automatically because
+            # accumulating the gradients is "convenient while training RNNs".
+            # (source: https://stackoverflow.com/questions/48001598/why-do-we-need-to-call-zero-grad-in-pytorch)
+            model.zero_grad()
+
+            # Perform a forward pass (evaluate the model on this training batch).
+            # The documentation for this `model` function is here:
+            # https://huggingface.co/transformers/v2.2.0/model_doc/bert.html#transformers.BertForSequenceClassification
+            # It returns different numbers of parameters depending on what arguments
+            # arge given and what flags are set. For our useage here, it returns
+            # the loss (because we provided labels) and the "logits"--the model
+            # outputs prior to activation.
+            outputs = model(b_input_ids,
+                            token_type_ids=None,
+                            attention_mask=b_input_mask,
+                            labels=b_labels)
+            loss = outputs.loss
+            logits = outputs.logits
+
+            # Accumulate the training loss over all of the batches so that we can
+            # calculate the average loss at the end. `loss` is a Tensor containing a
+            # single value; the `.item()` function just returns the Python value
+            # from the tensor.
+            total_train_loss += loss.item()
+
+            # Perform a backward pass to calculate the gradients.
+            loss.backward()
+
+            # Clip the norm of the gradients to 1.0.
+            # This is to help prevent the "exploding gradients" problem.
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+
+            # Update parameters and take a step using the computed gradient.
+            # The optimizer dictates the "update rule"--how the parameters are
+            # modified based on their gradients, the learning rate, etc.
+            optimizer.step()
+
+            # Update the learning rate.
+            scheduler.step()
+            end = time.time()
+
+        # Calculate the average loss over all of the batches.
+        avg_train_loss = total_train_loss / len(train_dataloader)
+
+        # Measure how long this epoch took.
+        training_time = format_time(time.time() - t0)
+
+        print("", flush=True)
+        print("  Average training loss: {0:.2f}".format(avg_train_loss), flush=True)
+        print("  Training epoch took: {:}".format(training_time), flush=True)
+
+    prediction_sampler = SequentialSampler(dataset)
+    prediction_dataloader = DataLoader(dataset,
+                                       sampler=prediction_sampler,
+                                       batch_size=batch_size,
+                                       num_workers=16,
+                                       pin_memory=True
+                                       )
+
+    first_ep_preds, first_ep_true_labels = evaluate(model, prediction_dataloader, device)
+    first_ep_pred_inds = get_labelinds_from_probs(first_ep_preds)
+
+    train_data = []
+    train_labels = []
+    true_train_labels = []
+    non_train_data = []
+    non_train_labels = []
+    true_non_train_labels = []
+
+    for loop_ind in range(len(first_ep_pred_inds)):
+        if first_ep_pred_inds[loop_ind] == y_pseudo[loop_ind]:
+            train_data.append(X[loop_ind])
+            train_labels.append(y_pseudo[loop_ind])
+            true_train_labels.append(y_true[loop_ind])
+        else:
+            non_train_data.append(X[loop_ind])
+            non_train_labels.append(y_pseudo[loop_ind])
+            true_non_train_labels.append(y_true[loop_ind])
+
+    return train_data, train_labels, true_train_labels, non_train_data, non_train_labels, true_non_train_labels
