@@ -50,9 +50,9 @@ def main(dataset_path, device=None, print_flag=True):
 
             return embedding_weights
 
-        tokenizer = fit_get_tokenizer(df.sentence, max_words=150000)
+        tokenizer = fit_get_tokenizer(df.text, max_words=150000)
         print("Total number of words: ", len(tokenizer.word_index))
-        tagged_data = tokenizer.texts_to_sequences(df.sentence)
+        tagged_data = tokenizer.texts_to_sequences(df.text)
         vocabulary_inv = {}
         for word in tokenizer.word_index:
             vocabulary_inv[tokenizer.word_index[word]] = word
