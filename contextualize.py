@@ -24,7 +24,7 @@ def main(dataset_path, temp_dir):
         for index, row in df.iterrows():
             if index % 100 == 0:
                 print("Finished sentences: " + str(index) + " out of " + str(len(df)))
-            line = row["sentence"]
+            line = row["text"]
             sentences = sent_tokenize(line)
             for sentence_ind, sent in enumerate(sentences):
                 sentence = Sentence(sent, use_tokenizer=True)
@@ -135,7 +135,7 @@ def main(dataset_path, temp_dir):
         for index, row in df.iterrows():
             if index % 100 == 0:
                 print("Finished rows: " + str(index) + " out of " + str(len(df)))
-            line = row["sentence"]
+            line = row["text"]
             sentences = sent_tokenize(line)
             for sentence_ind, sent in enumerate(sentences):
                 sentence = Sentence(sent, use_tokenizer=True)
@@ -174,7 +174,7 @@ def main(dataset_path, temp_dir):
                         cluster = get_cluster(tok_vec, cc)
                         sentence.tokens[token_ind].text = word + "$" + str(cluster)
                 sentences[sentence_ind] = to_tokenized_string(sentence)
-            df["sentence"][index] = " . ".join(sentences)
+            df["text"][index] = " . ".join(sentences)
         return df, word_cluster
 
     pkl_dump_dir = dataset_path

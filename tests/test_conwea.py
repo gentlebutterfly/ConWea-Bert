@@ -125,7 +125,7 @@ class TestConWea(unittest.TestCase):
             "law",
             "law"
         ])
-        df_dic = {"sentence": sentences, "label": labels}
+        df_dic = {"text": sentences, "label": labels}
         df = pd.DataFrame.from_dict(df_dic)
         pickle.dump(df, open(self.dataset_dir + "/df.pkl", "wb"))
         seedwords = {"soccer": ["penalty"], "law": ["judge"]}

@@ -152,7 +152,7 @@ def calculate_df_doc_freq(df):
     docfreq = {}
     docfreq["UNK"] = len(df)
     for index, row in df.iterrows():
-        line = row["sentence"]
+        line = row["text"]
         words = line.strip().split()
         temp_set = set(words)
         for w in temp_set:
@@ -238,7 +238,7 @@ def get_label_docs_dict(df, label_term_dict, pred_labels):
     for l in label_term_dict:
         label_docs_dict[l] = []
     for index, row in df.iterrows():
-        line = row["sentence"]
+        line = row["text"]
         label_docs_dict[pred_labels[index]].append(line)
     return label_docs_dict
 

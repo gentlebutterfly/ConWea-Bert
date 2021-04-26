@@ -21,7 +21,7 @@ class TestContextualize(unittest.TestCase):
     def test_contextualize(self):
         sentences = ["messi kicked penalty", "judge issued death penalty", "ronaldo scored penalty",
                      "judge gave a financial penalty"]
-        df_dic = {"sentence": sentences}
+        df_dic = {"text": sentences}
         df = pd.DataFrame.from_dict(df_dic)
         pickle.dump(df, open(self.dataset_dir + "/df.pkl", "wb"))
         seedwords = {"soccer": ["penalty"], "law": ["judge"]}

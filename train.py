@@ -68,7 +68,7 @@ def main(dataset_path, device=None, print_flag=True):
         for index, row in df.iterrows():
             if index % 100 == 0:
                 print("Finished rows: " + str(index) + " out of " + str(len(df)))
-            line = row["sentence"]
+            line = row["text"]
             words = line.strip().split()
             new_words = []
             for word in words:
@@ -80,7 +80,7 @@ def main(dataset_path, device=None, print_flag=True):
                         continue
                     word_vec[word] = vec
                 new_words.append(word)
-            df["sentence"][index] = " ".join(new_words)
+            df["text"][index] = " ".join(new_words)
         return df, word_vec
 
     def generate_pseudo_labels(df, labels, label_term_dict, tokenizer):
@@ -103,7 +103,7 @@ def main(dataset_path, device=None, print_flag=True):
         for w in tokenizer.word_index:
             index_word[tokenizer.word_index[w]] = w
         for index, row in df.iterrows():
-            line = row["sentence"]
+            line = row["text"]
             label = row["label"]
             tokens = tokenizer.texts_to_sequences([line])[0]
             words = []
@@ -173,7 +173,7 @@ def main(dataset_path, device=None, print_flag=True):
                              verbose=1, save_weights_only=True, save_best_only=True)
         model.fit(X_train, y_train, validation_data=(X_val, y_val), nb_epoch=100, batch_size=256, callbacks=[es, mc])
         print("****************** CLASSIFICATION REPORT FOR All DOCUMENTS ********************")
-        X_all = prep_data(texts=df["sentence"], max_sentences=max_sentences, max_sentence_length=max_sentence_length,
+        X_all = prep_data(texts=df["text"], max_sentences=max_sentences, max_sentence_length=max_sentence_length,
                           tokenizer=tokenizer)
         y_true_all = df["label"]
         pred = model.predict(X_all)
@@ -204,7 +204,7 @@ def main(dataset_path, device=None, print_flag=True):
 
         print("****************** CLASSIFICATION REPORT FOR All DOCUMENTS ********************")
         y_all = [label_to_index[l] for l in df["label"]]
-        predictions = test(model, df["sentence"], y_all, device)
+        predictions = test(model, df["text"], y_all, device)
         pred_inds = get_labelinds_from_probs(predictions)
         pred_labels = []
         for p in pred_inds:
