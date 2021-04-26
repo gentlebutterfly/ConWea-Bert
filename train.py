@@ -200,7 +200,8 @@ def main(dataset_path, device=None, print_flag=True):
         tokenizer = pickle.load(open(dataset_path + "tokenizer.pkl", "rb"))
 
         X, y, y_true = generate_pseudo_labels(df, labels, label_term_dict, tokenizer)
-        model = train_bert(X, y, device)
+        y_inds = [label_to_index[i] for i in y]
+        model = train_bert(X, y_inds, device)
 
         print("****************** CLASSIFICATION REPORT FOR All DOCUMENTS ********************")
         y_all = [label_to_index[l] for l in df["label"]]
