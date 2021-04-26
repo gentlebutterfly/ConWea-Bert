@@ -12,10 +12,12 @@ from collections import defaultdict
 from gensim.models import word2vec
 from keras_han.model import HAN
 from nltk.corpus import stopwords
+from bert_utils import train_bert, test
+import torch
 import os
 
 
-def main(dataset_path, print_flag=True):
+def main(dataset_path, device=None, print_flag=True):
     def train_word2vec(df, dataset_path):
         def get_embeddings(inp_data, vocabulary_inv, size_features=100,
                            mode='skipgram',
@@ -182,6 +184,35 @@ def main(dataset_path, print_flag=True):
         model.save(dump_dir + "model_" + model_name + ".h5")
         return pred_labels
 
+    def train_bert_classifier(df, labels, label_term_dict, label_to_index, index_to_label, dataset_path, device):
+        """
+        Trains BERT classifier and returns predictions on all documents
+        :param df:
+        :param labels:
+        :param label_term_dict:
+        :param label_to_index:
+        :param index_to_label:
+        :param dataset_path:
+        :return:
+        """
+
+        print("Going to train BERT classifier..")
+        tokenizer = pickle.load(open(dataset_path + "tokenizer.pkl", "rb"))
+
+        X, y, y_true = generate_pseudo_labels(df, labels, label_term_dict, tokenizer)
+        model = train_bert(X, y, device)
+
+        print("****************** CLASSIFICATION REPORT FOR All DOCUMENTS ********************")
+        y_all = [label_to_index[l] for l in df["label"]]
+        predictions = test(model, df["sentence"], y_all, device)
+        pred_inds = get_labelinds_from_probs(predictions)
+        pred_labels = []
+        for p in pred_inds:
+            pred_labels.append(index_to_label[p])
+
+        print(classification_report(df["label"], pred_labels))
+        return pred_labels
+
     def expand_seeds(df, label_term_dict, pred_labels, label_to_index, index_to_label, word_to_index, index_to_word,
                      inv_docfreq, docfreq, it, n1, doc_freq_thresh=5):
         def get_rank_matrix(docfreq, inv_docfreq, label_count, label_docs_dict, label_to_index, term_count,
@@ -306,7 +337,9 @@ def main(dataset_path, print_flag=True):
     train_word2vec(df, dataset_path)
     for i in range(6):
         print("ITERATION: ", i)
-        pred_labels = train_classifier(df, labels, label_term_dict, label_to_index, index_to_label, dataset_path)
+        # pred_labels = train_classifier(df, labels, label_term_dict, label_to_index, index_to_label, dataset_path)
+        pred_labels = train_bert_classifier(df, labels, label_term_dict, label_to_index, index_to_label, dataset_path,
+                                            device)
         label_term_dict, components = expand_seeds(df, label_term_dict, pred_labels, label_to_index, index_to_label,
                                                    word_to_index, index_to_word, inv_docfreq, docfreq, i, n1=5)
         if print_flag:
@@ -321,4 +354,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.gpu_id != "cpu":
         os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu_id)
-    main(dataset_path=args.dataset_path)
+        device = torch.device('cuda:' + str(args.gpu_id))
+    else:
+        device = torch.device("cpu")
+
+    main(dataset_path=args.dataset_path, device=device)
