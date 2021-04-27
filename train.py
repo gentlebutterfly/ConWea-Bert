@@ -382,6 +382,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset_path', type=str, default='./data/nyt/')
     parser.add_argument('--gpu_id', type=str, default="cpu")
+    parser.add_argument('--filter_flag', type=int, default=0)
     args = parser.parse_args()
     if args.gpu_id != "cpu":
         # os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu_id)
@@ -389,4 +390,4 @@ if __name__ == "__main__":
     else:
         device = torch.device("cpu")
 
-    main(dataset_path=args.dataset_path, device=device, filter_flag=args.filter_flag)
+    main(dataset_path=args.dataset_path, device=device, filter_flag=bool(args.filter_flag))
