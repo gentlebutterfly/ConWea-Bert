@@ -9,6 +9,9 @@ import random
 import numpy as np
 from util import *
 from collections import Counter
+import os
+
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
 def format_time(elapsed):
