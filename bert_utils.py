@@ -2,12 +2,13 @@ from torch.utils.data import TensorDataset, random_split
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 import torch
 import datetime
-from transformers import BertForSequenceClassification, BertTokenizer, AdamW, BertConfig, \
+from transformers import BertForSequenceClassification, BertTokenizerFast, AdamW, BertConfig, \
     get_linear_schedule_with_warmup
 import time
 import random
 import numpy as np
 from util import *
+from collections import Counter
 
 
 def format_time(elapsed):
@@ -378,7 +379,7 @@ def evaluate(model, prediction_dataloader, device):
 
 def test(model, X_test, y_test, device):
     start = time.time()
-    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
+    tokenizer = BertTokenizerFast.from_pretrained('bert-base-uncased', do_lower_case=True)
     input_ids, attention_masks, labels = bert_tokenize(tokenizer, X_test, y_test)
     print("Tokenizing text time:", time.time() - start, flush=True)
     batch_size = 32
@@ -400,7 +401,7 @@ def test(model, X_test, y_test, device):
 
 
 def train_bert(X, y, device):
-    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
+    tokenizer = BertTokenizerFast.from_pretrained('bert-base-uncased', do_lower_case=True)
     input_ids, attention_masks, labels = bert_tokenize(tokenizer, X, y)
 
     # Combine the training inputs into a TensorDataset.
@@ -419,8 +420,8 @@ def train_bert(X, y, device):
     return model
 
 
-def filter(X, y_pseudo, y_true, device, iteration=None):
-    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
+def filter(X, y_pseudo, y_true, device, percent_thresh=0.5, iteration=None):
+    tokenizer = BertTokenizerFast.from_pretrained('bert-base-uncased', do_lower_case=True)
     start = time.time()
     input_ids, attention_masks, labels = bert_tokenize(tokenizer, X, y_pseudo)
     print("Time taken in tokenizing:", time.time() - start)
@@ -442,6 +443,29 @@ def filter(X, y_pseudo, y_true, device, iteration=None):
     print("Time taken in initializing dataloader:", time.time() - start)
 
     num_labels = len(set(y_pseudo))
+
+    stop_flag = False
+    inds_map = {}
+    for i, j in enumerate(y_pseudo):
+        try:
+            inds_map[j].append(i)
+        except:
+            inds_map[j] = [i]
+
+    thresh_map = dict(Counter(y_pseudo))
+    print("Counts of pseudo-labels ", thresh_map, flush=True)
+    for i in thresh_map:
+        thresh_map[i] = int(thresh_map[i] * percent_thresh)
+
+    print("Threshold map ", thresh_map, flush=True)
+
+    filter_flag_map = {}
+    train_inds_map = {}
+    non_train_inds_map = {}
+    for i in thresh_map:
+        filter_flag_map[i] = False
+        train_inds_map[i] = []
+        non_train_inds_map[i] = []
     # Tell pytorch to run this model on the GPU.
 
     # Load BertForSequenceClassification, the pretrained BERT model with a single
@@ -464,7 +488,7 @@ def filter(X, y_pseudo, y_true, device, iteration=None):
     # Number of training epochs. The BERT authors recommend between 2 and 4.
     # We chose to run for 4, but we'll see later that this may be over-fitting the
     # training data.
-    epochs = 1
+    epochs = 4
 
     # Total number of training steps is [number of batches] x [number of epochs].
     # (Note that this is not the same as the number of training samples).
@@ -477,15 +501,6 @@ def filter(X, y_pseudo, y_true, device, iteration=None):
     # This training code is based on the `run_glue.py` script here:
     # https://github.com/huggingface/transformers/blob/5bfcd0485ece086ebcbed2d008813037968a9e58/examples/run_glue.py#L128
 
-    # Set the seed value all over the place to make this reproducible.
-    seed_val = 42
-
-    random.seed(seed_val)
-    np.random.seed(seed_val)
-    torch.manual_seed(seed_val)
-    if device.type == "cuda":
-        torch.cuda.manual_seed_all(seed_val)
-
     # We'll store a number of quantities such as training and validation loss,
     # validation accuracy, and timings.
     training_stats = []
@@ -496,7 +511,8 @@ def filter(X, y_pseudo, y_true, device, iteration=None):
     # For each epoch...
 
     print("Getting data that can be trained in 1 epoch..", flush=True)
-    for epoch_i in range(epochs):
+    epoch_i = 0
+    while not stop_flag and epoch_i < epochs:
 
         # ========================================
         #               Training
@@ -519,9 +535,12 @@ def filter(X, y_pseudo, y_true, device, iteration=None):
         # `dropout` and `batchnorm` layers behave differently during training
         # vs. test (source: https://stackoverflow.com/questions/51433378/what-does-model-train-do-in-pytorch)
         model.train()
+        data_time = AverageMeter('Data loading time', ':6.3f')
+        batch_time = AverageMeter('Batch processing time', ':6.3f')
         # For each batch of training data...
         end = time.time()
         for step, batch in enumerate(train_dataloader):
+            data_time.update(time.time() - end)
             # Progress update every 40 batches.
             if step % 40 == 0 and not step == 0:
                 # Calculate elapsed time in minutes.
@@ -584,8 +603,11 @@ def filter(X, y_pseudo, y_true, device, iteration=None):
 
             # Update the learning rate.
             scheduler.step()
+            batch_time.update(time.time() - end)
             end = time.time()
 
+        print(str(data_time), flush=True)
+        print(str(batch_time), flush=True)
         # Calculate the average loss over all of the batches.
         avg_train_loss = total_train_loss / len(train_dataloader)
 
@@ -596,16 +618,47 @@ def filter(X, y_pseudo, y_true, device, iteration=None):
         print("  Average training loss: {0:.2f}".format(avg_train_loss), flush=True)
         print("  Training epoch took: {:}".format(training_time), flush=True)
 
-    prediction_sampler = SequentialSampler(dataset)
-    prediction_dataloader = DataLoader(dataset,
-                                       sampler=prediction_sampler,
-                                       batch_size=batch_size,
-                                       num_workers=16,
-                                       pin_memory=True
-                                       )
+        prediction_sampler = SequentialSampler(dataset)
+        prediction_dataloader = DataLoader(dataset,
+                                           sampler=prediction_sampler,
+                                           batch_size=batch_size,
+                                           num_workers=16,
+                                           pin_memory=True
+                                           )
 
-    first_ep_preds, first_ep_true_labels = evaluate(model, prediction_dataloader, device)
-    first_ep_pred_inds = get_labelinds_from_probs(first_ep_preds)
+        first_ep_preds, first_ep_true_labels = evaluate(model, prediction_dataloader, device)
+        first_ep_pred_inds = get_labelinds_from_probs(first_ep_preds)
+
+        count = 0
+        for i in filter_flag_map:
+            if not filter_flag_map[i]:
+                train_inds, non_train_inds = compute_train_non_train_inds(first_ep_pred_inds, y_pseudo, inds_map, i)
+                train_inds_map[i] = train_inds
+                non_train_inds_map[i] = non_train_inds
+                if len(train_inds) >= thresh_map[i]:
+                    filter_flag_map[i] = True
+                    count += 1
+            else:
+                count += 1
+
+        print("Number of labels reached 50 percent threshold", count)
+        for i in filter_flag_map:
+            if not filter_flag_map[i]:
+                print("For label ", i, " Number expected ", thresh_map[i], " Found ", len(train_inds_map[i]))
+
+        temp_flg = True
+        for i in filter_flag_map:
+            temp_flg = temp_flg and filter_flag_map[i]
+        stop_flag = temp_flg
+        epoch_i += 1
+
+    if not stop_flag:
+        print("MAX EPOCHS REACHED!!!!!!", flush=True)
+        for i in filter_flag_map:
+            if not filter_flag_map[i]:
+                print("Resetting train, non-train inds for label ", i)
+                train_inds_map[i] = inds_map[i]
+                non_train_inds_map[i] = []
 
     train_data = []
     train_labels = []
@@ -614,12 +667,14 @@ def filter(X, y_pseudo, y_true, device, iteration=None):
     non_train_labels = []
     true_non_train_labels = []
 
-    for loop_ind in range(len(first_ep_pred_inds)):
-        if first_ep_pred_inds[loop_ind] == y_pseudo[loop_ind]:
+    for lbl in train_inds_map:
+        for loop_ind in train_inds_map[lbl]:
             train_data.append(X[loop_ind])
             train_labels.append(y_pseudo[loop_ind])
             true_train_labels.append(y_true[loop_ind])
-        else:
+
+    for lbl in non_train_inds_map:
+        for loop_ind in non_train_inds_map[lbl]:
             non_train_data.append(X[loop_ind])
             non_train_labels.append(y_pseudo[loop_ind])
             true_non_train_labels.append(y_true[loop_ind])
