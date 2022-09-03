@@ -235,8 +235,8 @@ def main(dataset_path, device=None, print_flag=True, filter_flag=0):
             X, y_inds, y_true, _, _, _ = prob_filter(X, y_inds, y_true, device, "nyt_fine", it)
             if len(set(y_inds)) < len(label_to_index):
                 print("Number of labels in training set after filtering:", len(set(y_inds)))
-                raise Exception(
-                    "Number of labels expected " + str(len(label_to_index)) + " but found " + str(len(set(y_inds))))
+                # raise Exception(
+                #     "Number of labels expected " + str(len(label_to_index)) + " but found " + str(len(set(y_inds))))
             correct = 0
             wrong = 0
             for i in range(len(y_inds)):
