@@ -196,6 +196,8 @@ def main(dataset_path, device=None, print_flag=True, filter_flag=0):
         :param dataset_path:
         :return:
         """
+        temp_label_to_index = {}
+        temp_index_to_label = {}
 
         print("Going to train BERT classifier..")
         tokenizer = pickle.load(open(dataset_path + "tokenizer.pkl", "rb"))
@@ -213,13 +215,18 @@ def main(dataset_path, device=None, print_flag=True, filter_flag=0):
         print("Correct Samples:", correct, flush=True)
         print("Wrong Samples:", wrong, flush=True)
 
+        if filter_flag:
+            for i, y in enumerate(sorted(list(set(y_inds)))):
+                temp_label_to_index[y] = i
+                temp_index_to_label[i] = y
+            y_inds = [temp_label_to_index[y] for y in y_inds]
+
         if filter_flag == 1:
             print("LOPS Filtering started..", flush=True)
             X, y_inds, y_true, _, _, _ = filter(X, y_inds, y_true, device)
             if len(set(y_inds)) < len(label_to_index):
                 print("Number of labels in training set after filtering:", len(set(y_inds)))
-                raise Exception(
-                    "Number of labels expected " + str(len(label_to_index)) + " but found " + str(len(set(y_inds))))
+            y_inds = [temp_index_to_label[y] for y in y_inds]
             correct = 0
             wrong = 0
             for i in range(len(y_inds)):
@@ -235,8 +242,7 @@ def main(dataset_path, device=None, print_flag=True, filter_flag=0):
             X, y_inds, y_true, _, _, _ = prob_filter(X, y_inds, y_true, device, "nyt_fine", it)
             if len(set(y_inds)) < len(label_to_index):
                 print("Number of labels in training set after filtering:", len(set(y_inds)))
-                # raise Exception(
-                #     "Number of labels expected " + str(len(label_to_index)) + " but found " + str(len(set(y_inds))))
+            y_inds = [temp_index_to_label[y] for y in y_inds]
             correct = 0
             wrong = 0
             for i in range(len(y_inds)):
@@ -248,6 +254,11 @@ def main(dataset_path, device=None, print_flag=True, filter_flag=0):
             print("Correct Samples in New training data:", correct, flush=True)
             print("Wrong Samples in New training data:", wrong, flush=True)
 
+        for i, y in enumerate(sorted(list(set(y_inds)))):
+            temp_label_to_index[y] = i
+            temp_index_to_label[i] = y
+        y_inds = [temp_label_to_index[y] for y in y_inds]
+
         model = train_bert(X, y_inds, device)
 
         print("****************** CLASSIFICATION REPORT FOR All DOCUMENTS ********************")
@@ -256,7 +267,7 @@ def main(dataset_path, device=None, print_flag=True, filter_flag=0):
         pred_inds = get_labelinds_from_probs(predictions)
         pred_labels = []
         for p in pred_inds:
-            pred_labels.append(index_to_label[p])
+            pred_labels.append(index_to_label[temp_index_to_label[p]])
 
         print(classification_report(df["label"], pred_labels))
         return pred_labels
