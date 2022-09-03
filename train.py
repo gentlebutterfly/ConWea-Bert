@@ -407,4 +407,4 @@ if __name__ == "__main__":
     else:
         device = torch.device("cpu")
 
-    main(dataset_path=args.dataset_path, device=device, filter_flag=bool(args.filter_flag))
+    main(dataset_path=args.dataset_path, device=device, filter_flag=args.filter_flag)
