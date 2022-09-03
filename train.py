@@ -12,12 +12,12 @@ from collections import defaultdict
 from gensim.models import word2vec
 from keras_han.model import HAN
 from nltk.corpus import stopwords
-from bert_utils import train_bert, test, filter
+from bert_utils import train_bert, test, filter, prob_filter
 import torch
 import os
 
 
-def main(dataset_path, device=None, print_flag=True, filter_flag=False):
+def main(dataset_path, device=None, print_flag=True, filter_flag=0):
     def train_word2vec(df, dataset_path):
         def get_embeddings(inp_data, vocabulary_inv, size_features=100,
                            mode='skipgram',
@@ -185,7 +185,7 @@ def main(dataset_path, device=None, print_flag=True, filter_flag=False):
         return pred_labels
 
     def train_bert_classifier(df, labels, label_term_dict, label_to_index, index_to_label, dataset_path, device,
-                              filter_flag=False):
+                              filter_flag=0, it=None):
         """
         Trains BERT classifier and returns predictions on all documents
         :param df:
@@ -213,9 +213,26 @@ def main(dataset_path, device=None, print_flag=True, filter_flag=False):
         print("Correct Samples:", correct, flush=True)
         print("Wrong Samples:", wrong, flush=True)
 
-        if filter_flag:
-            print("Filtering started..", flush=True)
+        if filter_flag == 1:
+            print("LOPS Filtering started..", flush=True)
             X, y_inds, y_true, _, _, _ = filter(X, y_inds, y_true, device)
+            if len(set(y_inds)) < len(label_to_index):
+                print("Number of labels in training set after filtering:", len(set(y_inds)))
+                raise Exception(
+                    "Number of labels expected " + str(len(label_to_index)) + " but found " + str(len(set(y_inds))))
+            correct = 0
+            wrong = 0
+            for i in range(len(y_inds)):
+                if y_inds[i] == label_to_index[y_true[i]]:
+                    correct += 1
+                else:
+                    wrong += 1
+            print("Filtering completed..", flush=True)
+            print("Correct Samples in New training data:", correct, flush=True)
+            print("Wrong Samples in New training data:", wrong, flush=True)
+        elif filter_flag == 2:
+            print("Confidence Filtering started..", flush=True)
+            X, y_inds, y_true, _, _, _ = prob_filter(X, y_inds, y_true, device, "nyt_fine", it)
             if len(set(y_inds)) < len(label_to_index):
                 print("Number of labels in training set after filtering:", len(set(y_inds)))
                 raise Exception(
@@ -366,11 +383,11 @@ def main(dataset_path, device=None, print_flag=True, filter_flag=False):
     inv_docfreq = calculate_inv_doc_freq(df, docfreq)
 
     train_word2vec(df, dataset_path)
-    for i in range(6):
+    for i in range(5):
         print("ITERATION: ", i)
         # pred_labels = train_classifier(df, labels, label_term_dict, label_to_index, index_to_label, dataset_path)
         pred_labels = train_bert_classifier(df, labels, label_term_dict, label_to_index, index_to_label, dataset_path,
-                                            device, filter_flag)
+                                            device, filter_flag, it=i)
         label_term_dict, components = expand_seeds(df, label_term_dict, pred_labels, label_to_index, index_to_label,
                                                    word_to_index, index_to_word, inv_docfreq, docfreq, i, n1=5)
         if print_flag:
